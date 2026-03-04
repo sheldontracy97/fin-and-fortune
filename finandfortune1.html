@@ -37,6 +37,12 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
   border-left:2px solid #b88820;
   display:flex;flex-direction:column;
   box-shadow:-4px 0 20px rgba(0,0,0,.3);z-index:80;}
+#rp-min-btn{display:none;align-items:center;justify-content:center;flex-shrink:0;
+  width:24px;height:24px;margin:6px 6px 6px 0;
+  border:1px solid rgba(106,74,24,.35);border-radius:7px;
+  background:linear-gradient(180deg,#f3e4c1,#dfc798);color:#6a4a18;font-size:.82rem;
+  font-weight:900;cursor:pointer;}
+#rp-min-btn:hover{color:#1a9e92;}
 /* VISUAL UPGRADE: Tabs — cleaner active state */
 .rp-tabs{display:flex;background:linear-gradient(180deg,#e8d5a8,#d8c490);border-bottom:2px solid #b88820;flex-shrink:0;}
 .rp-tab{flex:1;padding:8px 1px;text-align:center;font-size:.54rem;font-weight:700;cursor:pointer;border:none;background:transparent;color:#6a4a18;transition:all .18s;border-bottom:3px solid transparent;margin-bottom:-2px;font-family:'Nunito',sans-serif;line-height:1.4;}
@@ -165,7 +171,10 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
     z-index:91;
   }
   #right-panel.rp-open{transform:translateY(0);}
+  #right-panel.rp-minimized-mobile{transform:translateY(calc(100% - 44px));}
+  #right-panel.rp-minimized-mobile .rp-tab,#right-panel.rp-minimized-mobile #rp-body{display:none;}
   #rp-handle{display:flex;}
+  #rp-min-btn{display:flex;}
   #rp-backdrop{display:block;}
   /* Tabs — bigger touch targets */
   .rp-tab{padding:11px 1px;font-size:.57rem;}
@@ -205,6 +214,18 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
   background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .3s;
 }
 #rp-backdrop.rp-open{opacity:1;pointer-events:all;}
+@media (min-width:769px){
+  #right-panel{position:relative;transition:width .24s ease,min-width .24s ease;}
+  #rp-min-btn{display:flex;}
+  #right-panel.rp-minimized{width:44px;min-width:44px;}
+  #right-panel.rp-minimized .rp-tab,
+  #right-panel.rp-minimized #rp-body,
+  #right-panel.rp-minimized #rp-handle{display:none;}
+  #right-panel.rp-minimized .rp-tabs{
+    justify-content:center;padding-left:0;border-bottom:none;
+    background:transparent;
+  }
+}
 /* ── STARTUP SCREEN ─────────────────────────────────── */
 #startup-screen{position:fixed;inset:0;z-index:9999;background:#060e1e;display:flex;align-items:center;justify-content:center;}
 #startup-canvas{position:absolute;inset:0;width:100%;height:100%;}
@@ -279,6 +300,7 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
 <div id="main-layout">
   <canvas id="game-canvas"></canvas>
   <div id="right-panel">
+    <button id="rp-min-btn" onclick="toggleRightPanel()" title="Minimize menu">◀</button>
     <div id="rp-handle" onclick="rpMobileClose()">
       <div id="rp-handle-bar"></div>
       <span id="rp-handle-lbl">TAP TO CLOSE</span>
@@ -298,7 +320,7 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
   <button class="bb bb-sort" onclick="psOpen()">📦 Sort Shipment</button>
   <button class="bb bb-fish" onclick="openFC(0)">🐠 Fish Care</button>
   <button class="bb bb-shop" id="btn-shop" onclick="toggleShop()">🏪 Shop: Open</button>
-  <button class="bb bb-menu" id="btn-menu" onclick="switchTab('upgrades')">📋 Menu</button>
+  <button class="bb bb-menu" id="btn-menu" onclick="onMenuButtonTap()">📋 Menu</button>
 </div>
 <div id="notif"></div>
 <div id="mbanner"></div>
@@ -310,6 +332,97 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
 const REAL_TO_GAME=1, DAY_MINS=1440;
 const FEED_WINDOWS=[{id:'morning',s:360,e:720},{id:'evening',s:960,e:1320}];
 const XP_TABLE=[0,100,250,450,700,1000,1400,1900,2600,3500,5000];
+
+// ═══════════════════════════════════════════════════
+// AUDIO — gentle BGM + subtle UI click sounds
+// ═══════════════════════════════════════════════════
+const AUDIO={ctx:null,master:null,music:null,started:false,musicTimer:null,lastClickSfx:0,unlockBound:false};
+
+function audCtx(){
+  if(AUDIO.ctx)return AUDIO.ctx;
+  const Ctx=window.AudioContext||window.webkitAudioContext;
+  if(!Ctx)return null;
+  AUDIO.ctx=new Ctx();
+  AUDIO.master=AUDIO.ctx.createGain();
+  AUDIO.master.gain.value=.32;
+  AUDIO.master.connect(AUDIO.ctx.destination);
+  AUDIO.music=AUDIO.ctx.createGain();
+  AUDIO.music.gain.value=.22;
+  AUDIO.music.connect(AUDIO.master);
+  return AUDIO.ctx;
+}
+function audTone(freq=440,dur=.08,type='sine',vol=.03,when=0){
+  const ctx=audCtx();if(!ctx)return;
+  const t=ctx.currentTime+when;
+  const o=ctx.createOscillator(),g=ctx.createGain();
+  o.type=type;o.frequency.setValueAtTime(freq,t);
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(vol,t+.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(AUDIO.master);
+  o.start(t);o.stop(t+dur+.02);
+}
+function playClickSfx(){
+  const ctx=audCtx();if(!ctx)return;
+  const now=performance.now();
+  if(now-AUDIO.lastClickSfx<40)return; // keep rapid taps subtle
+  AUDIO.lastClickSfx=now;
+  const base=window.innerWidth<=768?600:680;
+  audTone(base,.05,'triangle',.045,0);
+  audTone(base*1.4,.04,'sine',.024,.02);
+}
+function bgmStep(){
+  const ctx=audCtx();if(!ctx||!AUDIO.started)return;
+  const prog=[220,247,262,247,220,196,185,196];
+  const bass=[110,123,131,123];
+  const beat=.62;
+  const i=((Date.now()/620)|0)%prog.length;
+  const j=((Date.now()/1240)|0)%bass.length;
+  const t0=ctx.currentTime+.02;
+
+  // soft pad-like lead
+  const o1=ctx.createOscillator(),g1=ctx.createGain(),f1=ctx.createBiquadFilter();
+  o1.type='triangle';o1.frequency.setValueAtTime(prog[i],t0);
+  f1.type='lowpass';f1.frequency.setValueAtTime(1100,t0);
+  g1.gain.setValueAtTime(0.0001,t0);
+  g1.gain.exponentialRampToValueAtTime(.055,t0+.12);
+  g1.gain.exponentialRampToValueAtTime(0.0001,t0+beat*.95);
+  o1.connect(f1);f1.connect(g1);g1.connect(AUDIO.music);
+  o1.start(t0);o1.stop(t0+beat);
+
+  // warm bass layer
+  const o2=ctx.createOscillator(),g2=ctx.createGain();
+  o2.type='sine';o2.frequency.setValueAtTime(bass[j],t0);
+  g2.gain.setValueAtTime(0.0001,t0);
+  g2.gain.exponentialRampToValueAtTime(.038,t0+.08);
+  g2.gain.exponentialRampToValueAtTime(0.0001,t0+beat*.9);
+  o2.connect(g2);g2.connect(AUDIO.music);
+  o2.start(t0);o2.stop(t0+beat);
+}
+function startAudio(){
+  const ctx=audCtx();if(!ctx||AUDIO.started)return;
+  const begin=()=>{
+    if(AUDIO.started)return;
+    AUDIO.started=true;
+    bgmStep();
+    AUDIO.musicTimer=setInterval(bgmStep,620);
+  };
+  if(ctx.state==='suspended'){
+    ctx.resume().then(begin).catch(()=>{});
+  }else begin();
+}
+function bindUiClickAudio(){
+  if(AUDIO.unlockBound)return;
+  AUDIO.unlockBound=true;
+  const unlock=()=>{if(!AUDIO.started)startAudio();};
+  document.addEventListener('pointerdown',unlock,{passive:true});
+  document.addEventListener('keydown',unlock,{passive:true});
+  document.addEventListener('pointerdown',e=>{
+    const el=e.target.closest('button,.bb,.ubtn,.rp-tab,.ovcls,.fcbtn');
+    if(!el)return;
+    playClickSfx();
+  },{passive:true});
+}
 
 const PRODUCTS=[
   {id:'flakes',   name:'Fish Flakes',    cat:'food',     emoji:'🐡',price:8,  tier:1,color:'#90EE90',unlocked:true},
@@ -3995,6 +4108,8 @@ function addFishUI(spId,tankSlot){
 // ═══════════════════════════════════════════════════
 let _tab='upgrades';
 let _nT=null,_bT=null;
+let _rpMinimized=false;
+let _rpMobileMinimized=false;
 
 function fmt(n){
   if(n>=1e6)return(n/1e6).toFixed(1)+'M';
@@ -4062,17 +4177,71 @@ function updateTopBar(){
   const xt=document.getElementById('xp-text');if(xt)xt.textContent=G.xp+'/'+need+' XP';
 }
 
+function onMenuButtonTap(){
+  if(window.innerWidth<=768){
+    const panel=document.getElementById('right-panel');
+    const isOpen=panel?.classList.contains('rp-open');
+    if(!isOpen){
+      switchTab('upgrades');
+      return;
+    }
+    if(_rpMobileMinimized){
+      setRightPanelMobileMinimized(false);
+      rpMobileOpen();
+    }else{
+      setRightPanelMobileMinimized(true);
+    }
+    return;
+  }
+  switchTab('upgrades');
+}
+
 function switchTab(tab){
+  if(window.innerWidth>768&&_rpMinimized)setRightPanelMinimized(false);
   _tab=tab;
   document.querySelectorAll('.rp-tab').forEach(b=>b.classList.toggle('rp-tab-active',b.dataset.tab===tab));
   updatePanel();
-  if(window.innerWidth<=768)rpMobileOpen();
+  if(window.innerWidth<=768){
+    setRightPanelMobileMinimized(false);
+    rpMobileOpen();
+  }
+}
+function setRightPanelMinimized(minimized){
+  if(window.innerWidth<=768)return;
+  _rpMinimized=minimized;
+  const panel=document.getElementById('right-panel');
+  const btn=document.getElementById('rp-min-btn');
+  panel?.classList.toggle('rp-minimized',minimized);
+  if(btn){
+    btn.textContent=minimized?'▶':'◀';
+    btn.title=minimized?'Expand menu':'Minimize menu';
+  }
+}
+function toggleRightPanel(){
+  if(window.innerWidth<=768){
+    setRightPanelMobileMinimized(!_rpMobileMinimized);
+    if(_rpMobileMinimized)rpMobileOpen();
+    return;
+  }
+  setRightPanelMinimized(!_rpMinimized);
+}
+function setRightPanelMobileMinimized(minimized){
+  if(window.innerWidth>768)return;
+  _rpMobileMinimized=minimized;
+  const panel=document.getElementById('right-panel');
+  const btn=document.getElementById('rp-min-btn');
+  panel?.classList.toggle('rp-minimized-mobile',minimized);
+  if(btn){
+    btn.textContent=minimized?'▲':'▼';
+    btn.title=minimized?'Expand menu':'Minimize menu';
+  }
 }
 function rpMobileOpen(){
   document.getElementById('right-panel').classList.add('rp-open');
   document.getElementById('rp-backdrop').classList.add('rp-open');
 }
 function rpMobileClose(){
+  if(window.innerWidth<=768)setRightPanelMobileMinimized(false);
   document.getElementById('right-panel').classList.remove('rp-open');
   document.getElementById('rp-backdrop').classList.remove('rp-open');
 }
@@ -4609,14 +4778,19 @@ function showStartup(){
 
   // Populate save info panel
   const saveEl=document.getElementById('su-save');
-  if(sd){
-    const fishCount=(sd.tanks||[]).reduce((a,t)=>a+(t.fish||[]).length,0);
-    saveEl.innerHTML=
+  const hasUsableSave = !!(sd&&typeof sd==='object'&&!Array.isArray(sd));
+  if(hasUsableSave){
+    const tanks=Array.isArray(sd.tanks)?sd.tanks:[];
+    const fishCount=tanks.reduce((a,t)=>a+((t&&Array.isArray(t.fish))?t.fish.length:0),0);
+    const day=Number.isFinite(sd.day)?sd.day:1;
+    const lv=Number.isFinite(sd.lv)?sd.lv:1;
+    const coins=Number.isFinite(sd.coins)?Math.floor(sd.coins):0;
+    if(saveEl)saveEl.innerHTML=
       '<div class="su-save-lbl">💾 Save File</div>'+
       '<div class="su-save-row">'+
-        '<div class="su-stat"><span class="su-stat-val">☀️ '+(sd.day||1)+'</span><span class="su-stat-lbl">Day</span></div>'+
-        '<div class="su-stat"><span class="su-stat-val">⭐ '+(sd.lv||1)+'</span><span class="su-stat-lbl">Level</span></div>'+
-        '<div class="su-stat"><span class="su-stat-val">🪙 '+Math.floor(sd.coins||0)+'</span><span class="su-stat-lbl">Coins</span></div>'+
+        '<div class="su-stat"><span class="su-stat-val">☀️ '+day+'</span><span class="su-stat-lbl">Day</span></div>'+
+        '<div class="su-stat"><span class="su-stat-val">⭐ '+lv+'</span><span class="su-stat-lbl">Level</span></div>'+
+        '<div class="su-stat"><span class="su-stat-val">🪙 '+coins+'</span><span class="su-stat-lbl">Coins</span></div>'+
         '<div class="su-stat"><span class="su-stat-val">🐟 '+fishCount+'</span><span class="su-stat-lbl">Fish</span></div>'+
       '</div>';
   }else{
@@ -4781,6 +4955,7 @@ function showStartup(){
 }
 
 function startupPlay(){
+  startAudio();
   const screen=document.getElementById('startup-screen');
   screen.style.transition='opacity .5s';
   screen.style.opacity='0';
@@ -4791,6 +4966,7 @@ function startupReset(){document.getElementById('su-confirm').style.display='';}
 function confirmReset(){localStorage.removeItem('ff_v5');location.reload();}
 
 showStartup();
+bindUiClickAudio();
 
 </script>
 </body>
