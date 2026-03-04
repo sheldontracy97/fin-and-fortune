@@ -320,7 +320,7 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
   <button class="bb bb-sort" onclick="psOpen()">📦 Sort Shipment</button>
   <button class="bb bb-fish" onclick="openFC(0)">🐠 Fish Care</button>
   <button class="bb bb-shop" id="btn-shop" onclick="toggleShop()">🏪 Shop: Open</button>
-  <button class="bb bb-menu" id="btn-menu" onclick="switchTab('upgrades')">📋 Menu</button>
+  <button class="bb bb-menu" id="btn-menu" onclick="onMenuButtonTap()">📋 Menu</button>
 </div>
 <div id="notif"></div>
 <div id="mbanner"></div>
@@ -4084,6 +4084,25 @@ function updateTopBar(){
   const need=XP_TABLE[Math.min(G.lv,XP_TABLE.length-1)];
   const xf=document.getElementById('xp-fill');if(xf)xf.style.width=(G.xp/need*100)+'%';
   const xt=document.getElementById('xp-text');if(xt)xt.textContent=G.xp+'/'+need+' XP';
+}
+
+function onMenuButtonTap(){
+  if(window.innerWidth<=768){
+    const panel=document.getElementById('right-panel');
+    const isOpen=panel?.classList.contains('rp-open');
+    if(!isOpen){
+      switchTab('upgrades');
+      return;
+    }
+    if(_rpMobileMinimized){
+      setRightPanelMobileMinimized(false);
+      rpMobileOpen();
+    }else{
+      setRightPanelMobileMinimized(true);
+    }
+    return;
+  }
+  switchTab('upgrades');
 }
 
 function switchTab(tab){
