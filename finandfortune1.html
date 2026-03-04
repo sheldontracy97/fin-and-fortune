@@ -37,6 +37,12 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
   border-left:2px solid #b88820;
   display:flex;flex-direction:column;
   box-shadow:-4px 0 20px rgba(0,0,0,.3);z-index:80;}
+#rp-min-btn{display:none;align-items:center;justify-content:center;flex-shrink:0;
+  width:24px;height:24px;margin:6px 6px 6px 0;
+  border:1px solid rgba(106,74,24,.35);border-radius:7px;
+  background:linear-gradient(180deg,#f3e4c1,#dfc798);color:#6a4a18;font-size:.82rem;
+  font-weight:900;cursor:pointer;}
+#rp-min-btn:hover{color:#1a9e92;}
 /* VISUAL UPGRADE: Tabs — cleaner active state */
 .rp-tabs{display:flex;background:linear-gradient(180deg,#e8d5a8,#d8c490);border-bottom:2px solid #b88820;flex-shrink:0;}
 .rp-tab{flex:1;padding:8px 1px;text-align:center;font-size:.54rem;font-weight:700;cursor:pointer;border:none;background:transparent;color:#6a4a18;transition:all .18s;border-bottom:3px solid transparent;margin-bottom:-2px;font-family:'Nunito',sans-serif;line-height:1.4;}
@@ -165,7 +171,10 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
     z-index:91;
   }
   #right-panel.rp-open{transform:translateY(0);}
+  #right-panel.rp-minimized-mobile{transform:translateY(calc(100% - 44px));}
+  #right-panel.rp-minimized-mobile .rp-tab,#right-panel.rp-minimized-mobile #rp-body{display:none;}
   #rp-handle{display:flex;}
+  #rp-min-btn{display:flex;}
   #rp-backdrop{display:block;}
   /* Tabs — bigger touch targets */
   .rp-tab{padding:11px 1px;font-size:.57rem;}
@@ -205,6 +214,18 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
   background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .3s;
 }
 #rp-backdrop.rp-open{opacity:1;pointer-events:all;}
+@media (min-width:769px){
+  #right-panel{position:relative;transition:width .24s ease,min-width .24s ease;}
+  #rp-min-btn{display:flex;}
+  #right-panel.rp-minimized{width:44px;min-width:44px;}
+  #right-panel.rp-minimized .rp-tab,
+  #right-panel.rp-minimized #rp-body,
+  #right-panel.rp-minimized #rp-handle{display:none;}
+  #right-panel.rp-minimized .rp-tabs{
+    justify-content:center;padding-left:0;border-bottom:none;
+    background:transparent;
+  }
+}
 /* ── STARTUP SCREEN ─────────────────────────────────── */
 #startup-screen{position:fixed;inset:0;z-index:9999;background:#060e1e;display:flex;align-items:center;justify-content:center;}
 #startup-canvas{position:absolute;inset:0;width:100%;height:100%;}
@@ -279,6 +300,7 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
 <div id="main-layout">
   <canvas id="game-canvas"></canvas>
   <div id="right-panel">
+    <button id="rp-min-btn" onclick="toggleRightPanel()" title="Minimize menu">◀</button>
     <div id="rp-handle" onclick="rpMobileClose()">
       <div id="rp-handle-bar"></div>
       <span id="rp-handle-lbl">TAP TO CLOSE</span>
@@ -298,7 +320,7 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
   <button class="bb bb-sort" onclick="psOpen()">📦 Sort Shipment</button>
   <button class="bb bb-fish" onclick="openFC(0)">🐠 Fish Care</button>
   <button class="bb bb-shop" id="btn-shop" onclick="toggleShop()">🏪 Shop: Open</button>
-  <button class="bb bb-menu" id="btn-menu" onclick="switchTab('upgrades')">📋 Menu</button>
+  <button class="bb bb-menu" id="btn-menu" onclick="onMenuButtonTap()">📋 Menu</button>
 </div>
 <div id="notif"></div>
 <div id="mbanner"></div>
@@ -3329,8 +3351,16 @@ const FISH_DRAW={
   },
 };
 
-function roundRect(c,x,y,w,h,r){
-  c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();
+function roundRect(c,x,y,w,h,r,fill=false,stroke=false){
+  c.beginPath();
+  c.moveTo(x+r,y);
+  c.arcTo(x+w,y,x+w,y+h,r);
+  c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r);
+  c.arcTo(x,y,x+w,y,r);
+  c.closePath();
+  if(fill)c.fill();
+  if(stroke)c.stroke();
 }
 function eye(c,x,y,r){
   c.fillStyle='#fff';c.beginPath();c.arc(x,y,r,0,Math.PI*2);c.fill();
@@ -3417,6 +3447,8 @@ function openTankView(slot){
   // Hover fish info in Tank View canvas
   tvc.addEventListener('mousemove', (ev)=>{
     try{
+      _fishTipLastX = ev.clientX;
+      _fishTipLastY = ev.clientY;
       const r=tvc.getBoundingClientRect();
       const mx=(ev.clientX-r.left)*(tvc.width/r.width);
       const my=(ev.clientY-r.top)*(tvc.height/r.height);
@@ -3643,6 +3675,8 @@ let _fishTipFid=null;
 let _fishTipSlot=0;
 let _fishTipHideT=null;
 let _fishTipLockPos=true;
+let _fishTipLastX = 0;
+let _fishTipLastY = 0;
 
 function bestFoodId(){
   const foods=PRODUCTS.filter(p=>p.cat==='food' && p.unlocked && (G.inv[p.id]||0)>0);
@@ -3703,7 +3737,8 @@ function toggleQuarantineFish(fid,slot){
     dest.fish.push(f);
     notify('✅ Fish removed from quarantine.');
     refreshFC();
-    showFishTip(null,f.id,dest.slot);
+    const destIndex=G.tanks.indexOf(dest);
+    showFishTip(null,f.id,destIndex>=0?destIndex:0);
     return;
   }
 }
@@ -3750,7 +3785,7 @@ function treatFishAuto(fid,slot){
 }
 
 function showFishTip(ev,fid,slot){
-  _fishTipLockPos=true;
+  _fishTipLockPos=!ev;
   if(_fishTipHideT){ clearTimeout(_fishTipHideT); _fishTipHideT=null; }
 
   ensureFishTip();
@@ -3795,35 +3830,52 @@ function showFishTip(ev,fid,slot){
     '</div>';
 
   tip.style.display='block';
-  if(ev) moveFishTip(ev);
 
-  // Lock tooltip position so you can click buttons
-  tip.style.display='block';
-  positionFishTip(ev);
+  // Only reposition if we have a real event, otherwise keep last known position
+  if(ev){
+    moveFishTip(ev);
+    positionFishTip(ev);
+  } else {
+    positionFishTip(null);
+  }
 }
 
 function positionFishTip(ev){
-  const tip=document.getElementById('fish-tip'); if(!tip) return;
-  let x=(ev?.clientX||0)+14, y=(ev?.clientY||0)+14;
-  // Clamp to viewport
+  const tip=document.getElementById('fish-tip'); 
+  if(!tip) return;
+
+  const cx = (ev && typeof ev.clientX === 'number') ? ev.clientX : _fishTipLastX;
+  const cy = (ev && typeof ev.clientY === 'number') ? ev.clientY : _fishTipLastY;
+
+  let x=cx+14, y=cy+14;
+
   tip.style.display='block';
   tip.style.position='fixed';
-  // Temporarily set to measure
+
+  // measure
   tip.style.left='-9999px';
   tip.style.top='-9999px';
   const r=tip.getBoundingClientRect();
+
   const maxX=window.innerWidth - r.width - 10;
   const maxY=window.innerHeight - r.height - 10;
+
   if(x>maxX) x=maxX;
   if(y>maxY) y=maxY;
   if(x<10) x=10;
   if(y<10) y=10;
+
   tip.style.left=x+'px';
   tip.style.top=y+'px';
 }
 
 function moveFishTip(ev){
-  const tip=document.getElementById('fish-tip'); if(!tip||tip.style.display==='none') return;
+  if(ev){
+    _fishTipLastX = ev.clientX;
+    _fishTipLastY = ev.clientY;
+  }
+  const tip=document.getElementById('fish-tip'); 
+  if(!tip || tip.style.display==='none') return;
   if(_fishTipLockPos) return;
   positionFishTip(ev);
 }
@@ -3995,6 +4047,8 @@ function addFishUI(spId,tankSlot){
 // ═══════════════════════════════════════════════════
 let _tab='upgrades';
 let _nT=null,_bT=null;
+let _rpMinimized=false;
+let _rpMobileMinimized=false;
 
 function fmt(n){
   if(n>=1e6)return(n/1e6).toFixed(1)+'M';
@@ -4062,17 +4116,71 @@ function updateTopBar(){
   const xt=document.getElementById('xp-text');if(xt)xt.textContent=G.xp+'/'+need+' XP';
 }
 
+function onMenuButtonTap(){
+  if(window.innerWidth<=768){
+    const panel=document.getElementById('right-panel');
+    const isOpen=panel?.classList.contains('rp-open');
+    if(!isOpen){
+      switchTab('upgrades');
+      return;
+    }
+    if(_rpMobileMinimized){
+      setRightPanelMobileMinimized(false);
+      rpMobileOpen();
+    }else{
+      setRightPanelMobileMinimized(true);
+    }
+    return;
+  }
+  switchTab('upgrades');
+}
+
 function switchTab(tab){
+  if(window.innerWidth>768&&_rpMinimized)setRightPanelMinimized(false);
   _tab=tab;
   document.querySelectorAll('.rp-tab').forEach(b=>b.classList.toggle('rp-tab-active',b.dataset.tab===tab));
   updatePanel();
-  if(window.innerWidth<=768)rpMobileOpen();
+  if(window.innerWidth<=768){
+    setRightPanelMobileMinimized(false);
+    rpMobileOpen();
+  }
+}
+function setRightPanelMinimized(minimized){
+  if(window.innerWidth<=768)return;
+  _rpMinimized=minimized;
+  const panel=document.getElementById('right-panel');
+  const btn=document.getElementById('rp-min-btn');
+  panel?.classList.toggle('rp-minimized',minimized);
+  if(btn){
+    btn.textContent=minimized?'▶':'◀';
+    btn.title=minimized?'Expand menu':'Minimize menu';
+  }
+}
+function toggleRightPanel(){
+  if(window.innerWidth<=768){
+    setRightPanelMobileMinimized(!_rpMobileMinimized);
+    if(_rpMobileMinimized)rpMobileOpen();
+    return;
+  }
+  setRightPanelMinimized(!_rpMinimized);
+}
+function setRightPanelMobileMinimized(minimized){
+  if(window.innerWidth>768)return;
+  _rpMobileMinimized=minimized;
+  const panel=document.getElementById('right-panel');
+  const btn=document.getElementById('rp-min-btn');
+  panel?.classList.toggle('rp-minimized-mobile',minimized);
+  if(btn){
+    btn.textContent=minimized?'▲':'▼';
+    btn.title=minimized?'Expand menu':'Minimize menu';
+  }
 }
 function rpMobileOpen(){
   document.getElementById('right-panel').classList.add('rp-open');
   document.getElementById('rp-backdrop').classList.add('rp-open');
 }
 function rpMobileClose(){
+  if(window.innerWidth<=768)setRightPanelMobileMinimized(false);
   document.getElementById('right-panel').classList.remove('rp-open');
   document.getElementById('rp-backdrop').classList.remove('rp-open');
 }
@@ -4199,7 +4307,7 @@ function panFish(body){
   let addInner='';
   FISH.forEach(sp=>{
     const repOk=G.lv>=sp.rep,exOk=sp.tier<4||ul('breed_lab')>0,ca=!sp.cost||G.coins>=sp.cost,locked=!repOk||!exOk;
-    addInner+=`<div class="ucard" style="opacity:${locked?.5:1}">
+    addInner+=`<div class="ucard" style="opacity:${locked ? 0.5 : 1}">
       <div class="utop"><span class="uico">${sp.em}</span><span class="unam">${sp.name} T${sp.tier}</span><span class="ulvl">⭐${sp.attr}</span></div>
       <div class="udesc">${sp.cost?'🪙'+sp.cost:'Free'}${!repOk?' | 🔒 Lv '+sp.rep+' req':''}</div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
