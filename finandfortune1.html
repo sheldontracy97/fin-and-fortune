@@ -3523,8 +3523,16 @@ const FISH_DRAW={
   },
 };
 
-function roundRect(c,x,y,w,h,r){
-  c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();
+function roundRect(c,x,y,w,h,r,fill=false,stroke=false){
+  c.beginPath();
+  c.moveTo(x+r,y);
+  c.arcTo(x+w,y,x+w,y+h,r);
+  c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r);
+  c.arcTo(x,y,x+w,y,r);
+  c.closePath();
+  if(fill)c.fill();
+  if(stroke)c.stroke();
 }
 function eye(c,x,y,r){
   c.fillStyle='#fff';c.beginPath();c.arc(x,y,r,0,Math.PI*2);c.fill();
@@ -3897,7 +3905,8 @@ function toggleQuarantineFish(fid,slot){
     dest.fish.push(f);
     notify('✅ Fish removed from quarantine.');
     refreshFC();
-    showFishTip(null,f.id,dest.slot);
+    const destIndex=G.tanks.indexOf(dest);
+    showFishTip(null,f.id,destIndex>=0?destIndex:0);
     return;
   }
 }
@@ -3944,7 +3953,7 @@ function treatFishAuto(fid,slot){
 }
 
 function showFishTip(ev,fid,slot){
-  _fishTipLockPos=true;
+  _fishTipLockPos=!ev;
   if(_fishTipHideT){ clearTimeout(_fishTipHideT); _fishTipHideT=null; }
 
   ensureFishTip();
