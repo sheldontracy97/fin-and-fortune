@@ -418,6 +418,98 @@ function bindUiClickAudio(){
   document.addEventListener('pointerdown',unlock,{passive:true});
   document.addEventListener('keydown',unlock,{passive:true});
   document.addEventListener('pointerdown',e=>{
+    const t=e.target;
+    const el=t instanceof Element?t.closest('button,.bb,.ubtn,.rp-tab,.ovcls,.fcbtn'):null;
+    if(!el)return;
+    playClickSfx();
+  },{passive:true});
+}
+
+// ═══════════════════════════════════════════════════
+// AUDIO — gentle BGM + subtle UI click sounds
+// ═══════════════════════════════════════════════════
+const AUDIO={ctx:null,master:null,music:null,started:false,musicTimer:null,lastClickSfx:0,unlockBound:false};
+
+function audCtx(){
+  if(AUDIO.ctx)return AUDIO.ctx;
+  const Ctx=window.AudioContext||window.webkitAudioContext;
+  if(!Ctx)return null;
+  AUDIO.ctx=new Ctx();
+  AUDIO.master=AUDIO.ctx.createGain();
+  AUDIO.master.gain.value=.32;
+  AUDIO.master.connect(AUDIO.ctx.destination);
+  AUDIO.music=AUDIO.ctx.createGain();
+  AUDIO.music.gain.value=.22;
+  AUDIO.music.connect(AUDIO.master);
+  return AUDIO.ctx;
+}
+function audTone(freq=440,dur=.08,type='sine',vol=.03,when=0){
+  const ctx=audCtx();if(!ctx)return;
+  const t=ctx.currentTime+when;
+  const o=ctx.createOscillator(),g=ctx.createGain();
+  o.type=type;o.frequency.setValueAtTime(freq,t);
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(vol,t+.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g);g.connect(AUDIO.master);
+  o.start(t);o.stop(t+dur+.02);
+}
+function playClickSfx(){
+  const ctx=audCtx();if(!ctx)return;
+  const now=performance.now();
+  if(now-AUDIO.lastClickSfx<40)return; // keep rapid taps subtle
+  AUDIO.lastClickSfx=now;
+  const base=window.innerWidth<=768?600:680;
+  audTone(base,.05,'triangle',.045,0);
+  audTone(base*1.4,.04,'sine',.024,.02);
+}
+function bgmStep(){
+  const ctx=audCtx();if(!ctx||!AUDIO.started)return;
+  const prog=[220,247,262,247,220,196,185,196];
+  const bass=[110,123,131,123];
+  const beat=.62;
+  const i=((Date.now()/620)|0)%prog.length;
+  const j=((Date.now()/1240)|0)%bass.length;
+  const t0=ctx.currentTime+.02;
+
+  // soft pad-like lead
+  const o1=ctx.createOscillator(),g1=ctx.createGain(),f1=ctx.createBiquadFilter();
+  o1.type='triangle';o1.frequency.setValueAtTime(prog[i],t0);
+  f1.type='lowpass';f1.frequency.setValueAtTime(1100,t0);
+  g1.gain.setValueAtTime(0.0001,t0);
+  g1.gain.exponentialRampToValueAtTime(.055,t0+.12);
+  g1.gain.exponentialRampToValueAtTime(0.0001,t0+beat*.95);
+  o1.connect(f1);f1.connect(g1);g1.connect(AUDIO.music);
+  o1.start(t0);o1.stop(t0+beat);
+
+  // warm bass layer
+  const o2=ctx.createOscillator(),g2=ctx.createGain();
+  o2.type='sine';o2.frequency.setValueAtTime(bass[j],t0);
+  g2.gain.setValueAtTime(0.0001,t0);
+  g2.gain.exponentialRampToValueAtTime(.038,t0+.08);
+  g2.gain.exponentialRampToValueAtTime(0.0001,t0+beat*.9);
+  o2.connect(g2);g2.connect(AUDIO.music);
+  o2.start(t0);o2.stop(t0+beat);
+}
+function startAudio(){
+  const ctx=audCtx();if(!ctx||AUDIO.started)return;
+  const begin=()=>{
+    if(AUDIO.started)return;
+    AUDIO.started=true;
+    bgmStep();
+    AUDIO.musicTimer=setInterval(bgmStep,620);
+  };
+  if(ctx.state==='suspended'){
+    ctx.resume().then(begin).catch(()=>{});
+  }else begin();
+}
+function bindUiClickAudio(){
+  if(AUDIO.unlockBound)return;
+  AUDIO.unlockBound=true;
+  const unlock=()=>{if(!AUDIO.started)startAudio();};
+  document.addEventListener('pointerdown',unlock,{passive:true});
+  document.addEventListener('keydown',unlock,{passive:true});
+  document.addEventListener('pointerdown',e=>{
     const el=e.target.closest('button,.bb,.ubtn,.rp-tab,.ovcls,.fcbtn');
     if(!el)return;
     playClickSfx();
@@ -5137,8 +5229,8 @@ function startupPlay(){
 function startupReset(){document.getElementById('su-confirm').style.display='';}
 function confirmReset(){localStorage.removeItem('ff_v5');location.reload();}
 
-showStartup();
-bindUiClickAudio();
+try{showStartup();}catch(e){console.warn('Startup UI fallback:',e);}
+try{bindUiClickAudio();}catch(e){console.warn('Audio binding fallback:',e);}
 
 </script>
 </body>
