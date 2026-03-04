@@ -171,7 +171,10 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
     z-index:91;
   }
   #right-panel.rp-open{transform:translateY(0);}
+  #right-panel.rp-minimized-mobile{transform:translateY(calc(100% - 44px));}
+  #right-panel.rp-minimized-mobile .rp-tab,#right-panel.rp-minimized-mobile #rp-body{display:none;}
   #rp-handle{display:flex;}
+  #rp-min-btn{display:flex;}
   #rp-backdrop{display:block;}
   /* Tabs — bigger touch targets */
   .rp-tab{padding:11px 1px;font-size:.57rem;}
@@ -4015,6 +4018,7 @@ function addFishUI(spId,tankSlot){
 let _tab='upgrades';
 let _nT=null,_bT=null;
 let _rpMinimized=false;
+let _rpMobileMinimized=false;
 
 function fmt(n){
   if(n>=1e6)return(n/1e6).toFixed(1)+'M';
@@ -4087,7 +4091,10 @@ function switchTab(tab){
   _tab=tab;
   document.querySelectorAll('.rp-tab').forEach(b=>b.classList.toggle('rp-tab-active',b.dataset.tab===tab));
   updatePanel();
-  if(window.innerWidth<=768)rpMobileOpen();
+  if(window.innerWidth<=768){
+    setRightPanelMobileMinimized(false);
+    rpMobileOpen();
+  }
 }
 function setRightPanelMinimized(minimized){
   if(window.innerWidth<=768)return;
@@ -4100,12 +4107,31 @@ function setRightPanelMinimized(minimized){
     btn.title=minimized?'Expand menu':'Minimize menu';
   }
 }
-function toggleRightPanel(){setRightPanelMinimized(!_rpMinimized);}
+function toggleRightPanel(){
+  if(window.innerWidth<=768){
+    setRightPanelMobileMinimized(!_rpMobileMinimized);
+    if(_rpMobileMinimized)rpMobileOpen();
+    return;
+  }
+  setRightPanelMinimized(!_rpMinimized);
+}
+function setRightPanelMobileMinimized(minimized){
+  if(window.innerWidth>768)return;
+  _rpMobileMinimized=minimized;
+  const panel=document.getElementById('right-panel');
+  const btn=document.getElementById('rp-min-btn');
+  panel?.classList.toggle('rp-minimized-mobile',minimized);
+  if(btn){
+    btn.textContent=minimized?'▲':'▼';
+    btn.title=minimized?'Expand menu':'Minimize menu';
+  }
+}
 function rpMobileOpen(){
   document.getElementById('right-panel').classList.add('rp-open');
   document.getElementById('rp-backdrop').classList.add('rp-open');
 }
 function rpMobileClose(){
+  if(window.innerWidth<=768)setRightPanelMobileMinimized(false);
   document.getElementById('right-panel').classList.remove('rp-open');
   document.getElementById('rp-backdrop').classList.remove('rp-open');
 }
