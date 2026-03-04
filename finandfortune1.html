@@ -301,9 +301,9 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
   <canvas id="game-canvas"></canvas>
   <div id="right-panel">
     <button id="rp-min-btn" onclick="toggleRightPanel()" title="Minimize menu">◀</button>
-    <div id="rp-handle" onclick="rpHandleTap()">
+    <div id="rp-handle" onclick="rpMobileClose()">
       <div id="rp-handle-bar"></div>
-      <span id="rp-handle-lbl">TAP TO MINIMIZE</span>
+      <span id="rp-handle-lbl">TAP TO CLOSE</span>
     </div>
     <div class="rp-tabs">
       <button class="rp-tab rp-tab-active" data-tab="upgrades" onclick="switchTab('upgrades')">⬆️<br>Upgrades</button>
@@ -4119,22 +4119,11 @@ function setRightPanelMobileMinimized(minimized){
   if(window.innerWidth>768)return;
   _rpMobileMinimized=minimized;
   const panel=document.getElementById('right-panel');
-  const lbl=document.getElementById('rp-handle-lbl');
   const btn=document.getElementById('rp-min-btn');
   panel?.classList.toggle('rp-minimized-mobile',minimized);
-  if(lbl)lbl.textContent=minimized?'TAP TO EXPAND':'TAP TO MINIMIZE';
   if(btn){
     btn.textContent=minimized?'▲':'▼';
     btn.title=minimized?'Expand menu':'Minimize menu';
-  }
-}
-function rpHandleTap(){
-  if(window.innerWidth>768){rpMobileClose();return;}
-  if(_rpMobileMinimized){
-    setRightPanelMobileMinimized(false);
-    rpMobileOpen();
-  }else{
-    setRightPanelMobileMinimized(true);
   }
 }
 function rpMobileOpen(){
