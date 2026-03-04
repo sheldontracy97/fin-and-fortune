@@ -3619,6 +3619,8 @@ function openTankView(slot){
   // Hover fish info in Tank View canvas
   tvc.addEventListener('mousemove', (ev)=>{
     try{
+      _fishTipLastX = ev.clientX;
+      _fishTipLastY = ev.clientY;
       const r=tvc.getBoundingClientRect();
       const mx=(ev.clientX-r.left)*(tvc.width/r.width);
       const my=(ev.clientY-r.top)*(tvc.height/r.height);
@@ -3845,6 +3847,8 @@ let _fishTipFid=null;
 let _fishTipSlot=0;
 let _fishTipHideT=null;
 let _fishTipLockPos=true;
+let _fishTipLastX = 0;
+let _fishTipLastY = 0;
 
 function bestFoodId(){
   const foods=PRODUCTS.filter(p=>p.cat==='food' && p.unlocked && (G.inv[p.id]||0)>0);
@@ -3998,35 +4002,52 @@ function showFishTip(ev,fid,slot){
     '</div>';
 
   tip.style.display='block';
-  if(ev) moveFishTip(ev);
 
-  // Lock tooltip position so you can click buttons
-  tip.style.display='block';
-  positionFishTip(ev);
+  // Only reposition if we have a real event, otherwise keep last known position
+  if(ev){
+    moveFishTip(ev);
+    positionFishTip(ev);
+  } else {
+    positionFishTip(null);
+  }
 }
 
 function positionFishTip(ev){
-  const tip=document.getElementById('fish-tip'); if(!tip) return;
-  let x=(ev?.clientX||0)+14, y=(ev?.clientY||0)+14;
-  // Clamp to viewport
+  const tip=document.getElementById('fish-tip'); 
+  if(!tip) return;
+
+  const cx = (ev && typeof ev.clientX === 'number') ? ev.clientX : _fishTipLastX;
+  const cy = (ev && typeof ev.clientY === 'number') ? ev.clientY : _fishTipLastY;
+
+  let x=cx+14, y=cy+14;
+
   tip.style.display='block';
   tip.style.position='fixed';
-  // Temporarily set to measure
+
+  // measure
   tip.style.left='-9999px';
   tip.style.top='-9999px';
   const r=tip.getBoundingClientRect();
+
   const maxX=window.innerWidth - r.width - 10;
   const maxY=window.innerHeight - r.height - 10;
+
   if(x>maxX) x=maxX;
   if(y>maxY) y=maxY;
   if(x<10) x=10;
   if(y<10) y=10;
+
   tip.style.left=x+'px';
   tip.style.top=y+'px';
 }
 
 function moveFishTip(ev){
-  const tip=document.getElementById('fish-tip'); if(!tip||tip.style.display==='none') return;
+  if(ev){
+    _fishTipLastX = ev.clientX;
+    _fishTipLastY = ev.clientY;
+  }
+  const tip=document.getElementById('fish-tip'); 
+  if(!tip || tip.style.display==='none') return;
   if(_fishTipLockPos) return;
   positionFishTip(ev);
 }
@@ -4458,7 +4479,7 @@ function panFish(body){
   let addInner='';
   FISH.forEach(sp=>{
     const repOk=G.lv>=sp.rep,exOk=sp.tier<4||ul('breed_lab')>0,ca=!sp.cost||G.coins>=sp.cost,locked=!repOk||!exOk;
-    addInner+=`<div class="ucard" style="opacity:${locked?.5:1}">
+    addInner+=`<div class="ucard" style="opacity:${locked ? 0.5 : 1}">
       <div class="utop"><span class="uico">${sp.em}</span><span class="unam">${sp.name} T${sp.tier}</span><span class="ulvl">⭐${sp.attr}</span></div>
       <div class="udesc">${sp.cost?'🪙'+sp.cost:'Free'}${!repOk?' | 🔒 Lv '+sp.rep+' req':''}</div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
