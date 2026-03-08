@@ -111,6 +111,20 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
 .fcard{background:linear-gradient(180deg,#fff,#fdf8ee);border-radius:11px;padding:10px 13px;border:2px solid #e0d0b0;margin-bottom:9px;box-shadow:0 2px 6px rgba(0,0,0,.07);}
 .fcard.sick{border-color:#ff8888;background:linear-gradient(180deg,#fff5f5,#ffeee8);}
 
+/* Shipment shelf-stocking minigame */
+.ps-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;}
+.ps-shelf{border:2px solid #b58a3a;border-radius:12px;background:linear-gradient(180deg,#fff7e8,#f2dfba);padding:8px;box-shadow:0 2px 8px rgba(0,0,0,.08);} 
+.ps-shelf h4{font-size:.66rem;color:#5c3d08;margin-bottom:6px;text-transform:uppercase;letter-spacing:.8px;}
+.ps-row{display:flex;gap:5px;margin-bottom:5px;align-items:center;}
+.ps-row:last-child{margin-bottom:0;}
+.ps-rowlbl{font-size:.52rem;font-weight:800;color:#6d4d15;min-width:38px;text-transform:uppercase;}
+.ps-slot{flex:1;border:2px dashed rgba(0,0,0,.22);border-radius:8px;min-height:34px;display:flex;align-items:center;justify-content:center;font-size:.95rem;transition:all .14s;background:rgba(255,255,255,.5);} 
+.ps-slot.hot{border-style:solid;transform:scale(1.03);} 
+.ps-slot.filled{border-style:solid;border-color:rgba(0,0,0,.2);background:rgba(255,255,255,.85);} 
+.ps-item{display:flex;align-items:center;gap:7px;border-radius:9px;padding:6px 8px;cursor:grab;border:2px solid rgba(0,0,0,.14);box-shadow:0 2px 7px rgba(0,0,0,.12);} 
+.ps-item b{font-size:.64rem;display:block;line-height:1.1;color:#2a1a0a;}
+.ps-item small{font-size:.54rem;color:rgba(0,0,0,.62);}
+
 #fish-tip{
   position:fixed;
   z-index:9999;
@@ -195,7 +209,7 @@ body{background:#0e0a04;font-family:'Nunito',sans-serif;color:#2a1a0a;overflow:h
   }
   /* Overlays */
   .ovpanel{width:96vw;max-width:96vw;}
-  #fish-tip{max-width:88vw;}
+#fish-tip{max-width:88vw;}
   /* Startup */
   #startup-ui{padding:24px 26px;min-width:unset;width:88vw;}
   .su-logo{font-size:1rem;}
@@ -1729,10 +1743,7 @@ function staffSortTick(dt){
   const closedSortBoost = (!G.open)?6:1;
   if(_staffSortTimer < (4000/closedSortBoost)) return;
   _staffSortTimer=0;
-  const u=psItems.filter(i=>!i.sorted);
-  if(!u.length)return;
-  const it=u[~~(Math.random()*u.length)];
-  psPlace(it,it.cat,true);
+  psAutoPlaceOne('stocker');
 }
 
 // ═══════════════════════════════════════════════════
@@ -3100,55 +3111,64 @@ const SHELVES=[
   {id:'decor',    lbl:'Décor',     col:'#F0E0FF',hov:'#D8B0FF',bdr:'#8050CC'},
   {id:'misc',     lbl:'Misc',      col:'#FFF0E0',hov:'#FFD8B0',bdr:'#CC8050'},
 ];
+const PS_SIZE_ROWS=['top','mid','bot'];
+const PS_ROW_LABEL={top:'Small',mid:'Medium',bot:'Large'};
+const PS_BANDS=['cool','neutral','warm'];
 
-// Shipment state (keeps sorting progress even when menu is closed)
-let psItems=[],psSorted={},psStreak=0,psEarned=0,psSel=null;
+let psItems=[],psStreak=0,psSel=null;
 let psPriT={},psOv=null;
 let psActive=false;
-let psPendingInv={}; // items earned from sorting (applied on Collect only)
+let psPendingInv={};
+let psXPBank=0,psTimeStarted=0,psWholesaleCost=0,psRowPlaced={};
+
+function psBandFromHex(hex){
+  if(!hex||hex[0]!=='#'||hex.length<7) return 'neutral';
+  const r=parseInt(hex.slice(1,3),16)||0,g=parseInt(hex.slice(3,5),16)||0,b=parseInt(hex.slice(5,7),16)||0;
+  if(Math.abs(r-g)<18 && Math.abs(g-b)<18) return 'neutral';
+  if((r>g+16&&r>b+8)||(r>180&&g>120&&b<90)) return 'warm';
+  return 'cool';
+}
+function psSizeFromTier(tier){ return tier<=1?'top':tier===2?'mid':'bot'; }
+function psSlotKey(cat,row,band){ return cat+'|'+row+'|'+band; }
 
 function psStartShipment(force=false){
-  // Start only if none active, or if forcing a fresh shipment (after collect)
   if(psActive && !force) return;
-  // Block new shipments if shelves are full
-  if(shelvesFull()){
-    showShelfFullPopup();
-    return;
-  }
-
-  // Clear any old priority timers
+  if(shelvesFull()){ showShelfFullPopup(); return; }
   Object.values(psPriT).forEach(t=>clearTimeout(t));
   psPriT={};
-
   const bb=ul('backroom')*5;
   const count=Math.min(10+G.lv+bb,25);
   const pool=PRODUCTS.filter(p=>p.unlocked);
+  if(!pool.length){ notify('No unlocked products for shipment yet.'); return; }
 
-  psItems=[];
+  const draft=[];
   for(let i=0;i<count;i++){
     const p=pool[~~(Math.random()*pool.length)];
-    psItems.push({
+    const size=psSizeFromTier(p.tier);
+    const band=psBandFromHex(p.color);
+    draft.push({
       iid:Date.now()+'-'+i,
       pid:p.id,name:p.name,cat:p.cat,em:p.emoji,price:p.price,tier:p.tier,col:p.color,
-      fragile:p.cat==='decor'&&Math.random()<.35,
-      priority:Math.random()<.18,priOk:true,sorted:false
+      size,band,priority:Math.random()<.2,priOk:true,sorted:false
     });
   }
+  const cost=Math.max(10,Math.ceil(draft.reduce((a,it)=>a+it.price*0.55,0)*(1+count*0.005)));
+  if(!spend(cost)){ notify('Need 🪙'+cost+' to buy wholesale shipment.'); return; }
 
-  psSorted={};SHELVES.forEach(s=>psSorted[s.id]=[]);
-  psStreak=0;psEarned=0;psSel=null;
-  psPendingInv={};
+  psWholesaleCost=cost;
+  psItems=draft;
+  psStreak=0;psSel=null;psXPBank=0;psPendingInv={};psRowPlaced={};
+  psTimeStarted=Date.now();
   psActive=true;
 
-  // Priority timers should keep running even if the sort menu is closed
   psItems.filter(i=>i.priority).forEach(item=>{
     psPriT[item.iid]=setTimeout(()=>{ item.priOk=false; if(psOv)psRe(); },10000);
   });
 }
 
 function psOpen(){
-  // Opening the menu should NOT create a new shipment if one is already in progress.
   if(!psActive) psStartShipment(true);
+  if(!psActive) return;
   psBuild();
 }
 
@@ -3157,25 +3177,33 @@ function psBuild(){
   psOv=document.createElement('div');
   psOv.className='ovbg';psOv.style.zIndex='200';
   psOv.innerHTML=`
-  <div class="ovpanel" style="width:min(950px,97vw);">
+  <div class="ovpanel" style="width:min(1080px,98vw);">
     <div class="ovhdr">
-      <span style="font-size:1.2rem">📦</span>
-      <span class="ovtitle">Shipment Sorting</span>
-      <span style="font-size:.62rem;color:rgba(255,255,255,.35);margin-left:4px">— items auto-sort in the background. Open this to collect rewards.</span>
-      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-        <div id="ps-str" style="background:linear-gradient(135deg,rgba(0,0,0,.45),rgba(0,0,0,.25));border:1px solid rgba(255,200,0,.2);border-radius:8px;padding:4px 11px;color:#fff;font-weight:700;font-size:.76rem;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)">🔥 ×0</div>
-        <div style="background:linear-gradient(135deg,rgba(0,0,0,.45),rgba(0,0,0,.25));border:1px solid rgba(255,200,0,.25);border-radius:8px;padding:4px 11px;color:#FFD700;font-size:.76rem;font-weight:700;box-shadow:inset 0 1px 0 rgba(255,255,255,.06)">🪙 +<span id="ps-earn">0</span></div>
-        <button id="ps-collect" onclick="psComplete()" style="background:linear-gradient(135deg,#3dcc72,#2aaa5a);border:none;border-radius:9px;color:#fff;padding:7px 15px;cursor:pointer;font-weight:700;font-family:Nunito,sans-serif;font-size:.76rem;box-shadow:0 3px 10px rgba(42,170,90,.4)">✅ Collect</button>
-        <button class="ovcls" onclick="psClose()">✕</button>
+      <span style="font-size:1.2rem">🧺</span>
+      <span class="ovtitle">Shelf Styling Sprint</span>
+      <span style="font-size:.62rem;color:rgba(255,255,255,.72)">Sort by shelf + size row + color band for XP</span>
+      <button class="ovcls" onclick="psClose()">✕ Close</button>
+    </div>
+    <div style="padding:10px 12px;border-bottom:1px solid rgba(0,0,0,.12);font-size:.67rem;color:#5e4318;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <span id="ps-prog-txt" style="font-weight:800">0/0</span>
+      <span id="ps-time" style="font-weight:700">⏱️ 0.0s</span>
+      <span id="ps-xp" style="font-weight:800;color:#1a9e92">0 XP</span>
+      <span id="ps-cost" style="font-weight:700;color:#8a3f10">Wholesale: -🪙0</span>
+      <span id="ps-hint" style="margin-left:auto;font-size:.62rem;font-weight:700"></span>
+    </div>
+    <div style="display:grid;grid-template-columns:minmax(230px,300px) 1fr;gap:12px;padding:10px;align-items:start;max-height:66vh;overflow:auto">
+      <div>
+        <div style="font-size:.62rem;font-weight:800;color:#7a5010;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">📦 Incoming Items</div>
+        <div id="ps-tray" style="display:flex;flex-direction:column;gap:6px;max-height:58vh;overflow:auto;padding-right:4px"></div>
+      </div>
+      <div>
+        <div style="font-size:.62rem;font-weight:800;color:#7a5010;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">🏪 Showroom Shelves</div>
+        <div id="ps-shelves" class="ps-grid"></div>
       </div>
     </div>
-    <div style="display:flex;flex:1;overflow:hidden;min-height:0;">
-      <div id="ps-tray" style="width:215px;min-width:215px;background:linear-gradient(180deg,#e8d8a8,#d8c890);border-right:2px solid #b88820;padding:10px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;flex-shrink:0;box-shadow:inset -3px 0 8px rgba(0,0,0,.1)"></div>
-      <div id="ps-shelves" style="flex:1;padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:9px;overflow-y:auto;background:linear-gradient(180deg,#ede0c0,#e4d4a8);align-content:start;"></div>
-    </div>
-    <div style="background:linear-gradient(180deg,#e0d0a0,#d0c088);border-top:2px solid #b88820;padding:8px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0;box-shadow:inset 0 1px 0 rgba(255,255,255,.2)">
-      <div style="flex:1"><div style="font-size:.62rem;color:#7a5810;font-weight:600;margin-bottom:4px">Sorted: <span id="ps-prog-txt">0/0</span></div><div style="background:rgba(0,0,0,.15);height:7px;border-radius:4px;overflow:hidden;border:1px solid rgba(0,0,0,.1)"><div id="ps-prog" style="height:100%;background:linear-gradient(90deg,#3dcc72,#2ec4b6);width:0%;transition:width .35s ease-out;border-radius:4px;box-shadow:0 0 6px rgba(46,196,182,.5)"></div></div></div>
-      <div id="ps-hint" style="font-size:.63rem;color:#7a5810;font-weight:600"></div>
+    <div style="display:flex;gap:10px;justify-content:center;align-items:center;font-weight:700;padding:10px;border-top:1px solid rgba(0,0,0,.12)">
+      <span id="ps-str">🔥 Combo ×0</span>
+      <button id="ps-collect" onclick="psComplete()" style="padding:8px 14px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:.85rem">Stock Shelves</button>
     </div>
   </div>`;
   document.body.appendChild(psOv);
@@ -3184,152 +3212,129 @@ function psBuild(){
 
 function psRe(){
   const tray=document.getElementById('ps-tray');
-  if(!tray)return;
-
-  tray.innerHTML=`<div style="font-size:.59rem;font-weight:800;color:#7a5010;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px;display:flex;align-items:center;gap:4px">📬 Incoming Crate</div>`;
+  if(!tray) return;
+  tray.innerHTML='';
   psItems.filter(i=>!i.sorted).forEach(item=>{
     const el=document.createElement('div');
     const sel=psSel?.iid===item.iid;
-    el.style.cssText=`
-      background:linear-gradient(160deg,${item.col||'#ddd'}ee,${item.col||'#ddd'}99);
-      border-radius:10px;padding:7px 10px;cursor:grab;
-      display:flex;align-items:center;gap:8px;
-      border:2px solid ${sel?'#FFD700':item.col||'transparent'};
-      box-shadow:${sel?'0 0 0 2px rgba(255,215,0,.4),':''}0 3px 8px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.3);
-      position:relative;user-select:none;transition:all .14s;`;
+    const pLabel=item.priority?(item.priOk?'⚡ Rush':'⌛ Late'):'';
+    el.className='ps-item';
     el.draggable=true;
-    let badges='';
-    if(item.fragile)badges+=`<span style="position:absolute;top:-5px;right:-5px;background:linear-gradient(135deg,#9370DB,#6a44bb);color:#fff;font-size:.46rem;padding:2px 5px;border-radius:5px;font-weight:800;box-shadow:0 2px 5px rgba(0,0,0,.3)">💎 FRAGILE</span>`;
-    if(item.priority&&item.priOk)badges+=`<span style="position:absolute;top:-5px;left:-5px;background:linear-gradient(135deg,#ff4444,#cc2222);color:#fff;font-size:.46rem;padding:2px 5px;border-radius:5px;font-weight:800;box-shadow:0 2px 5px rgba(0,0,0,.3)">⚡ RUSH</span>`;
-    el.innerHTML=`${badges}
-      <div style="width:30px;height:30px;background:linear-gradient(135deg,rgba(255,255,255,.55),rgba(255,255,255,.2));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:1.15rem;flex-shrink:0;box-shadow:0 2px 5px rgba(0,0,0,.15),inset 0 1px 0 rgba(255,255,255,.4)">${item.em}</div>
-      <div><div style="font-size:.7rem;font-weight:700;color:#1a1008;text-shadow:0 1px 2px rgba(255,255,255,.4)">${item.name}</div><div style="font-size:.57rem;color:rgba(0,0,0,.5);margin-top:1px">T${item.tier} · 🪙${item.price}</div></div>`;
+    el.style.background=`linear-gradient(135deg,${item.col||'#ddd'}ee,${item.col||'#ddd'}aa)`;
+    el.style.outline=sel?'2px solid #2ec4b6':'none';
+    el.innerHTML=`<span style="font-size:1.25rem">${item.em}</span><div><b>${item.name}</b><small>${PS_ROW_LABEL[item.size]} • ${item.band} tone ${pLabel}</small></div>`;
     el.addEventListener('click',()=>{psSel=psSel?.iid===item.iid?null:item;psRe();});
-    el.addEventListener('mouseenter',()=>{if(!sel)el.style.transform='translateY(-1px)';});
-    el.addEventListener('mouseleave',()=>{el.style.transform='';});
-    el.addEventListener('dragstart',e=>{e.dataTransfer.setData('iid',item.iid);psSel=item;setTimeout(()=>{el.style.opacity='.35';el.style.transform='scale(.95)';},0);});
-    el.addEventListener('dragend',()=>{el.style.opacity='1';el.style.transform='';});
+    el.addEventListener('dragstart',e=>{e.dataTransfer.setData('iid',item.iid);psSel=item;setTimeout(()=>{el.style.opacity='.45';},0);});
+    el.addEventListener('dragend',()=>{el.style.opacity='1';});
     tray.appendChild(el);
   });
 
   const sh=document.getElementById('ps-shelves');
-  if(!sh)return;
   sh.innerHTML='';
   SHELVES.forEach(sd=>{
     const shelf=document.createElement('div');
-    shelf.style.cssText=`
-      background:linear-gradient(160deg,${sd.col}f0,${sd.col}b0);
-      border-radius:12px;border:2px dashed ${sd.bdr};
-      padding:10px;min-height:95px;
-      transition:all .18s;cursor:default;
-      box-shadow:0 3px 10px rgba(0,0,0,.1),inset 0 1px 0 rgba(255,255,255,.35);`;
-    const items=psSorted[sd.id]||[];
-    shelf.innerHTML=`
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
-        <span style="font-weight:800;font-size:.82rem;color:#1a1008;text-shadow:0 1px 2px rgba(255,255,255,.4)">${sd.lbl}</span>
-        <span style="font-size:.6rem;color:rgba(0,0,0,.4);background:rgba(0,0,0,.08);border-radius:4px;padding:1px 5px">${items.length}/25</span>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:5px;min-height:40px">
-        ${items.length===0
-          ?'<span style="font-size:.6rem;color:rgba(0,0,0,.22);font-style:italic;padding:9px 4px;width:100%;text-align:center">Drop or click items here…</span>'
-          :items.map(it=>`
-            <div style="width:36px;height:36px;border-radius:8px;
-              background:linear-gradient(135deg,${it.col||'#ddd'}ee,${it.col||'#ddd'}99);
-              display:flex;align-items:center;justify-content:center;font-size:.92rem;
-              box-shadow:0 2px 6px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.35);
-              animation:popIn .22s cubic-bezier(.34,1.56,.64,1)" title="${it.name}">${it.em}</div>`).join('')
-        }
-      </div>`;
-    shelf.addEventListener('dragover',e=>{e.preventDefault();shelf.style.borderStyle='solid';shelf.style.background=`linear-gradient(160deg,${sd.hov}f0,${sd.hov}b0)`;shelf.style.transform='scale(1.02)';});
-    shelf.addEventListener('dragleave',()=>{shelf.style.borderStyle='dashed';shelf.style.background=`linear-gradient(160deg,${sd.col}f0,${sd.col}b0)`;shelf.style.transform='';});
-    shelf.addEventListener('drop',e=>{e.preventDefault();shelf.style.borderStyle='dashed';shelf.style.background=`linear-gradient(160deg,${sd.col}f0,${sd.col}b0)`;shelf.style.transform='';const iid=e.dataTransfer.getData('iid');const item=psItems.find(i=>i.iid===iid);if(item)psPlace(item,sd.id,false);});
-    shelf.addEventListener('click',()=>{if(psSel)psPlace(psSel,sd.id,false);});
+    shelf.className='ps-shelf';
+    shelf.style.borderColor=sd.bdr;
+    shelf.innerHTML=`<h4>${sd.lbl}</h4>`;
+    PS_SIZE_ROWS.forEach(row=>{
+      const rowEl=document.createElement('div');
+      rowEl.className='ps-row';
+      rowEl.innerHTML=`<span class="ps-rowlbl">${PS_ROW_LABEL[row]}</span>`;
+      PS_BANDS.forEach(band=>{
+        const key=psSlotKey(sd.id,row,band);
+        const slot=document.createElement('div');
+        const filled=psRowPlaced[key];
+        slot.className='ps-slot'+(filled?' filled':'');
+        slot.style.background=`linear-gradient(160deg,${sd.col}cc,${sd.hov}aa)`;
+        slot.title=`${sd.lbl}: ${PS_ROW_LABEL[row]} ${band}`;
+        slot.innerHTML=filled?`<span title="${filled.name}">${filled.em}</span>`:`<small style="font-size:.52rem;opacity:.72">${band}</small>`;
+        const onPlace=(it)=>{ if(it) psPlace(it,sd.id,row,band,false); };
+        slot.addEventListener('dragover',e=>{e.preventDefault();slot.classList.add('hot');});
+        slot.addEventListener('dragleave',()=>slot.classList.remove('hot'));
+        slot.addEventListener('drop',e=>{e.preventDefault();slot.classList.remove('hot');const iid=e.dataTransfer.getData('iid');const it=psItems.find(i=>i.iid===iid);onPlace(it);});
+        slot.addEventListener('click',()=>onPlace(psSel));
+        rowEl.appendChild(slot);
+      });
+      shelf.appendChild(rowEl);
+    });
     sh.appendChild(shelf);
   });
 
   const tot=psItems.length,sorted=psItems.filter(i=>i.sorted).length;
-  const done=(tot>0 && sorted===tot);
-
-  const pt=document.getElementById('ps-prog-txt');if(pt)pt.textContent=sorted+'/'+tot;
-  const pf=document.getElementById('ps-prog');if(pf)pf.style.width=(tot?sorted/tot*100:0)+'%';
-
-  const ps=document.getElementById('ps-str');
-  if(ps){
-    ps.textContent='🔥 ×'+psStreak;
-    ps.style.color=psStreak>=5?'#FFD700':psStreak>=3?'#ffcc44':'#fff';
-    ps.style.boxShadow=psStreak>=3?'0 0 8px rgba(255,200,0,.4)':'';
-  }
-  const pe=document.getElementById('ps-earn');if(pe)pe.textContent=~~psEarned;
-
+  const done=(tot>0&&sorted===tot);
+  const elapsed=(Date.now()-psTimeStarted)/1000;
+  const t=document.getElementById('ps-time');if(t)t.textContent='⏱️ '+elapsed.toFixed(1)+'s';
+  const pt=document.getElementById('ps-prog-txt');if(pt)pt.textContent=`${sorted}/${tot} placed`;
+  const ps=document.getElementById('ps-str');if(ps)ps.textContent='🔥 Combo ×'+psStreak;
+  const xp=document.getElementById('ps-xp');if(xp)xp.textContent=`${Math.floor(psXPBank)} XP banked`;
+  const cost=document.getElementById('ps-cost');if(cost)cost.textContent=`Wholesale: -🪙${psWholesaleCost}`;
   const hint=document.getElementById('ps-hint');
   if(hint){
-    const rateMsg = (ul('auto_sort')>0 || G.staff.some(s=>s.id==='stocker'))
-      ? '🤖 Auto-sorting in background…'
-      : '💡 Tip: Buy Auto-Sorter or hire a Stocker to auto-sort while this menu is closed.';
-    hint.textContent = done ? '✅ Shipment fully sorted. Click Collect!' : rateMsg;
+    hint.textContent=done ? '✅ Everything styled. Stock shelves!' : 'Rule: category + size row + color band (cool / neutral / warm).';
   }
-
   const cb=document.getElementById('ps-collect');
   if(cb){
     cb.disabled=!done;
-    cb.style.filter = done ? 'none' : 'grayscale(1) brightness(.9)';
-    cb.style.opacity = done ? '1' : '.65';
-    cb.style.cursor = done ? 'pointer' : 'not-allowed';
+    cb.style.filter=done?'none':'grayscale(1) brightness(.9)';
+    cb.style.opacity=done?'1':'.65';
+    cb.style.cursor=done?'pointer':'not-allowed';
   }
 }
 
-function psPlace(item,shelfId,auto=false){
-  // auto=true is used by background sorters; it should never grant rewards immediately.
-  if(item.sorted)return;
-  if((psSorted[shelfId]||[]).length>=25){ if(!auto) notify('Shelf full!'); return; }
+function psAutoPlaceOne(src='auto'){
+  const u=psItems.filter(i=>!i.sorted);
+  if(!u.length)return false;
+  const it=u[~~(Math.random()*u.length)];
+  psPlace(it,it.cat,it.size,it.band,true,src);
+  return true;
+}
 
-  if(shelfId===item.cat){
-    item.sorted=true;psSorted[shelfId].push(item);
-    if(psSel?.iid===item.iid)psSel=null;
+function psPlace(item,shelfId,row,band,auto=false,src='manual'){
+  if(!item||item.sorted)return;
+  const key=psSlotKey(shelfId,row,band);
+  if(psRowPlaced[key]){ if(!auto) notify('That shelf slot is already filled.'); return; }
+
+  if(shelfId===item.cat && row===item.size && band===item.band){
+    item.sorted=true;
+    psRowPlaced[key]=item;
+    psPendingInv[item.pid]=(psPendingInv[item.pid]||0)+1;
+    if(psSel?.iid===item.iid) psSel=null;
     psStreak++;
 
-    // Reward math stays the same, but it is BANKED until Collect.
-    const sm=Math.min(1+psStreak*.03,1.8);
-    const tm=[1,1,1.3,1.6,2.0][Math.min(item.tier,4)];
-    const fb=item.fragile?1.4:1;
-    const pb=(item.priority&&item.priOk)?1.5:1;
-    const sb=1+(G.sat-50)/200;
-    const scan=ul('scanner')?[0,3,6,10][Math.min(ul('scanner'),3)]:0;
-    const rwd=Math.ceil((item.price*.15+scan)*tm*sm*fb*pb*sb*restockMult());
-    psEarned+=rwd;
-
-    psPendingInv[item.pid]=(psPendingInv[item.pid]||0)+1;
-
     if(item.priority&&item.priOk) clearTimeout(psPriT[item.iid]);
-
-    // Rare find bonus (banked)
-    if(Math.random()<.07){ psEarned+=rwd*.25; if(!auto) notify('🎟️ Rare Find! +25% bonus!'); }
+    const combo=Math.min(1+psStreak*0.04,1.8);
+    const tierMul=[1,1,1.25,1.55,1.8][Math.min(item.tier,4)];
+    const rush=(item.priority&&item.priOk)?1.35:1;
+    const sat=0.85+(G.sat/100)*0.4;
+    const rowBonus=row==='top'?1.08:row==='mid'?1.15:1.25;
+    const base=8+item.price*0.25;
+    let gain=Math.ceil(base*combo*tierMul*rush*sat*rowBonus);
+    if(auto) gain=Math.ceil(gain*0.5);
+    psXPBank+=gain;
   }else{
     psStreak=0;
-    if(!auto) notify('↩️ Wrong shelf — try a different one!');
+    if(!auto) notify('↩️ Layout mismatch. Match shelf, size row, and color tone.');
   }
-
   if(psOv) psRe();
 }
 
 function psComplete(){
   if(!psActive){ notify('No active shipment.'); return; }
   const tot=psItems.length,sorted=psItems.filter(i=>i.sorted).length;
-  if(tot===0 || sorted<tot){ notify('⏳ Shipment is still being sorted.'); return; }
+  if(tot===0 || sorted<tot){ notify('⏳ Finish placing all items first.'); return; }
 
-  // Apply banked rewards NOW (this is the only place you gain benefits)
-  if(psEarned>0){
-    addCoins(psEarned);
-    const xp=~~(psEarned*.4)+psStreak*5+20;
-    if(addXP(xp))onLevelUp();
-  }
+  const secs=Math.max(1,(Date.now()-psTimeStarted)/1000);
+  const speed=Math.max(0,Math.ceil(220-secs*4));
+  const perfect=psItems.every(i=>i.priOk||!i.priority)?35:0;
+  const assistOn=(ul('auto_sort')>0 || G.staff.some(s=>s.id==='stocker'));
+  let totalXP=Math.floor(psXPBank+speed+perfect+20);
+  if(assistOn) totalXP=Math.floor(totalXP*0.5);
+  if(totalXP>0 && addXP(totalXP)) onLevelUp();
+
   Object.entries(psPendingInv).forEach(([pid,q])=>addInv(pid,q));
+  G.ships++;
+  notify(`📚 Shelves stocked! +${totalXP} XP${assistOn?' (auto-sort active: 50%)':''}`);
 
-  // Perfect sort bonus
-  const b=30+G.lv*10;addCoins(b);notify('⭐ Shipment collected! +'+b+' perfect bonus!');
-  G.ships++;addXP(20);
-
-  // Start next shipment only if there is space on shelves.
   if(shelvesFull()){
     psActive=false;
     notify('📦 Shelves full — no new shipments until stock sells.');
@@ -3338,13 +3343,10 @@ function psComplete(){
   }
 
   checkMilestones();updateAll();save();
-
-  // Keep the menu open if it's open, otherwise just return.
   if(psOv) psRe();
 }
 
 function psClose(){
-  // Closing should NOT stop the background sorting or priority timers.
   if(psOv){ psOv.remove(); psOv=null; }
 }
 // ═══════════════════════════════════════════════════
@@ -4605,7 +4607,7 @@ function panHelp(body){
     </div>
     <div class="usec" style="margin-top:8px">❓ How to Play</div>
     <div class="ucard" style="font-size:.7rem;color:#5c4020;line-height:1.85">
-      <b>📦 Sorting:</b> Sort items onto shelves — no hints! Build streaks. While shop is closed, sorting gives +50% coins (Restock Mode).<br><br>
+      <b>📦 Sorting:</b> Play Shelf Styling Sprint: drag each shipment item to the right shelf, size row, and color tone slot to earn XP. Shipments now cost coins up front as wholesale expense.<br><br>
       <b>🏪 Shop Hours:</b> Opening during <b style="color:#FFD700">Morning Rush 8–10am</b> or <b style="color:#FF9800">Evening Rush 5–7pm</b> triggers bonus revenue and customer floods. Grand Opening each day: +10 Sat.<br><br>
       <b>🐠 Tanks:</b> Click any tank for a close-up view. Feed 🌅 morning + 🌙 evening. Clean daily. Disease tutorial appears on first sickness.<br><br>
       <b>👥 Staff:</b> Hire staff to automate feeding, cleaning, sorting, and checkout. Daily wages deducted at dawn.<br><br>
@@ -4647,10 +4649,7 @@ function bgAutoSortTick(dt){
   _bgSortTimer+=dt;
   if(_bgSortTimer<iv)return;
   _bgSortTimer=0;
-  const u=psItems.filter(i=>!i.sorted);
-  if(!u.length)return;
-  const it=u[~~(Math.random()*u.length)];
-  psPlace(it,it.cat,true);
+  psAutoPlaceOne('auto_sort');
 }
 
 // ═══════════════════════════════════════════════════
